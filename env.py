@@ -8,32 +8,32 @@ from dm_control.locomotion.arenas import floors
 from dm_control.locomotion.walkers import CMUHumanoidPositionControlledV2020
 from dm_control.locomotion.mocap.loader import HDF5TrajectoryLoader
 from dm_control.locomotion.mocap.cmu_mocap_data import *
-from dm_control.suite.humanoid_CMU import HumanoidCMU
-
-qpos = np.zeros(shape=(63),dtype=np.float64)
-qpos[0:7] = [0 ,0 ,1, 0.859, 1.   , 1.   , 0.859]
+from dm_control.locomotion.walkers import cmu_humanoid
 
 class HumanoidEnvironment:
     def __init__(self):
         self.arena  = floors.Floor()
-        self.human = CMUHumanoidPositionControlledV2020()
+        self.human = cmu_humanoid.CMUHumanoidPositionControlled()
         self.arena.add_free_entity(self.human)
+        
         self.arena.mjcf_model.worldbody.add(
                     "camera",
                     name="follow",
                     mode="track",
                     target="walker/root",
-                    pos=[0, 0, 5],   # behind & above humanoid
+                    pos=[0, 0, 3],   # behind & above humanoid
                     fovy=90
                     )
         self.physics = mjcf.Physics.from_mjcf_model(self.arena.mjcf_model)
+        self.low_act = np.ones(shape=(1,56))
+        self.high_act = np.ones(shape=(1,56))
 
     def NumActuator(self):
         return self.physics.model.nu
     
     def reset(self):
         self.physics.reset()
-        self.physics.data.qpos[:] = qpos
+        self.physics.data.qpos[:] = 0
         self.physics.data.qvel[:] = 0
 
     def step(self,arr:np.array): #56 actuators or motors
@@ -46,7 +46,8 @@ class HumanoidEnvironment:
         for i in range(self.physics.model.nu):
             name = self.physics.model.id2name(i, mj.mjtObj.mjOBJ_ACTUATOR)
             ctrl_low, ctrl_high = self.physics.model.actuator_ctrlrange[i]
-            print(i, name, ctrl_low, ctrl_high)
+            self.low_act[0 , i] = ctrl_low
+            self.high_act[0,i] = ctrl_high
         print("\n")
 
     def WalkerPos(self):
@@ -203,7 +204,6 @@ class CMUTrajectory :
         self.numpoints = np.array(self.traj["walker/position"]).shape[0]
     
     def LoadPoint(self,physics,i):
-        physics.reset()
         physics.data.qpos[7:] = self.traj["walker/joints"][i]
         physics.data.qpos[0:3] = self.traj["walker/position"][i][:]
         physics.data.qpos[3:7] = self.traj["walker/quaternion"][i][:]
@@ -217,31 +217,33 @@ def stop_loop():
     exit = False
 
 
-
-env = HumanoidEnvironment()
-
-env.reset()
-phy = env.physics
-trj = CMUTrajectory()
-kb.add_hotkey("esc",stop_loop)
-
-#make window for opencv
-cv.namedWindow("Opencv",cv.WINDOW_NORMAL)
-cv.resizeWindow("Opencv",800,400)
-step_counter = 0
-i = 0
-while exit:
-    trj.LoadPoint(physics=phy,i=i)
-    i+=1
-    if i==trj.numpoints: i=0
-    # render every 2-3 steps instead of every single step
-    if step_counter % 2 == 0:
-        cam_arr = phy.data.qpos[0:3] + np.array([0,0,1])
-        pixels = phy.render(height=200, width=400,camera_id="follow")
-        cv.imshow("Opencv", pixels)
-
-    if cv.waitKey(1) & 0xFF == 27:
-        break
-
-    step_counter += 1
-    time.sleep(0.005)  # smaller sleep
+if __name__ == "__main__":
+    env = HumanoidEnvironment()
+    print(env.NumActuator())
+    
+    env.reset()
+    phy = env.physics
+    trj = CMUTrajectory()
+    kb.add_hotkey("esc",stop_loop)
+    
+    #make window for opencv
+    cv.namedWindow("Opencv",cv.WINDOW_NORMAL)
+    cv.resizeWindow("Opencv",800,400)
+    step_counter = 0
+    i = 0
+    
+    while exit:
+        trj.LoadPoint(physics=phy,i=i)
+        i+=1
+        if i==trj.numpoints: i=0
+        # render every 2-3 steps instead of every single step
+        if step_counter % 2 == 0:
+            pixels = phy.render(height=360, width=640,camera_id="walker/egocentric")
+            cv.imshow("Opencv", pixels)
+    
+        if cv.waitKey(1) & 0xFF == 27:
+            break
+    
+        step_counter += 1
+        time.sleep(0.005)  # smaller sleep
+    
